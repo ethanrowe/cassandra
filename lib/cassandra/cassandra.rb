@@ -24,7 +24,7 @@ For write methods, valid option parameters are:
 <tt>:timestamp </tt>:: The transaction timestamp. Defaults to the current time in milliseconds. This is used for conflict resolution by the server; you normally never need to change it.
 <tt>:consistency</tt>:: See above.
 
-For the initial client instantiation, you may also pass in <tt>:thrift_client<tt> with a ThriftClient subclass attached. On connection, that class will be used instead of the default ThriftClient class, allowing you to add additional behavior to the connection (e.g. query logging).
+For the initial client instantiation, you may also pass in <tt>:thrift_client</tt> with a ThriftClient subclass attached. On connection, that class will be used instead of the default ThriftClient class, allowing you to add additional behavior to the connection (e.g. query logging).
 
 =end rdoc
 
@@ -127,13 +127,22 @@ class Cassandra
   def remove(column_family, key, *columns_and_options)
     column_family, column, sub_column, options = extract_and_validate_params(column_family, key, columns_and_options, WRITE_DEFAULTS)
 
-    args = {:column_family => column_family}
     columns = is_super(column_family) ? {:super_column => column, :column => sub_column} : {:column => column}
-    column_path = CassandraThrift::ColumnPath.new(args.merge(columns))
-    
-    mutation = [:remove, [key, column_path, options[:timestamp] || Time.stamp, options[:consistency]]]
-    
-    @batch ? @batch << mutation : _remove(*mutation[1])
+
+    # for now, can only use mutations for deletes if column is specified, because
+    # slice ranges aren't supported for deletes yet
+    if columns[:column]
+      mutation_map = {
+        key => {
+          column_family => [ _basic_deletion(columns[:column], columns[:super_column], options[:timestamp] || Time.stamp) ]
+        }
+      }
+      @batch ? @batch << [mutation_map, options[:consistency]] : _mutate(mutation_map, options[:consistency])
+    else
+      column_path = CassandraThrift::ColumnPath.new(columns.merge(:column_family => column_family))
+      mutation = [:remove, [key, column_path, options[:timestamp] || Time.stamp, options[:consistency]]]
+      @batch ? @batch << mutation : _remove(*mutation[1])
+    end
   end
 
   # Remove all rows in the column family you request. Supports options
@@ -240,14 +249,26 @@ class Cassandra
   # Open a batch operation and yield. Inserts and deletes will be queued until
   # the block closes, and then sent atomically to the server.  Supports the
   # <tt>:consistency</tt> option, which overrides the consistency set in
-  # the individual commands.
+  # the individual commands (whether you specify a consistency or not).
+  #
+  # The batch operation maximizes use of the Cassandra Thrift API's +batch_mutate+
+  # method, gathering up actions into a mutation map.  This should give the same
+  # results as applying actions in sequence, but reduce I/O overhead.
+  #
+  # The +batch_mutate+ interface requires a column predicate for deletions, and as of
+  # this writing will only support column predicates using explicit column names (not
+  # column slices).  Therefore, deletes that do not specify a column will require
+  # their own Thrift invocations.  The logical order of operations is maintained, and
+  # subsequent inserts/deletes in the batch that are +batch_mutate+-compatible will
+  # go into a new mutation map.
   def batch(options = {})
     _, _, _, options = 
       extract_and_validate_params(schema.keys.first, "", [options], WRITE_DEFAULTS)
 
-    @batch = []
+    @batch = Cassandra::Batch.new
+    @batch.consistency = options[:consistency] if options[:consistency]
+
     yield
-    compact_mutations!
 
     @batch.each do |mutation|
       case mutation.first
@@ -265,11 +286,6 @@ class Cassandra
 
   def calling_method
     "#{self.class}##{caller[0].split('`').last[0..-3]}"
-  end
-
-  # Roll up queued mutations, to improve atomicity.
-  def compact_mutations!
-    #TODO re-do this rollup
   end
 
   def schema(load=true)

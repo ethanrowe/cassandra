@@ -143,6 +143,7 @@ class Cassandra
       column_family, column, sub_column, options = extract_and_validate_params_for_real(column_family, key, columns_and_options, WRITE_DEFAULTS)
       if @batch
         @batch << [:remove, column_family, key, column]
+        @batch.last << sub_column if sub_column
       else
         if column
           if sub_column

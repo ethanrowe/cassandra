@@ -321,7 +321,15 @@ class CassandraTest < Test::Unit::TestCase
 
       @twitter.remove(:Users, k + '4')
       @twitter.insert(:Users, k + '4', {'body' => 'v4', 'user' => 'v4'})
+      @twitter.insert(:Users, k + '5', {'body' => 'v5', 'user' => 'v5'})
+      @twitter.remove(:Users, k + '5', 'user')
       assert_equal({}, @twitter.get(:Users, k + '4')) # Not yet written
+
+      # supercolumns
+      @twitter.insert(:StatusRelationships, k, {'user_timelines' => {@uuids[1] => 'v1', @uuids[2] => 'v1'}})
+      @twitter.insert(:StatusRelationships, k + '1', {'user_timelines' => {@uuids[1] => 'v2', @uuids[2] => 'v2'}})
+      @twitter.insert(:StatusRelationships, k + '1', {'user_timelines' => {@uuids[1] => 'v3'}})
+      @twitter.remove(:StatusRelationships, k + '1', 'user_timelines', @uuids[2])
     end
 
     assert_equal({'body' => 'v2', 'user' => 'v2'}, @twitter.get(:Users, k + '2')) # Written
@@ -329,6 +337,10 @@ class CassandraTest < Test::Unit::TestCase
     assert_equal({'body' => 'v4', 'user' => 'v4'}, @twitter.get(:Users, k + '4')) # Written
     assert_equal({'body' => 'v'}, @twitter.get(:Statuses, k + '3')) # Written
     assert_equal({}, @twitter.get(:Users, k + '1')) # Removed
+    assert_equal({'body' => 'v5'}, @twitter.get(:Users, k + '5')) # body written, user removed
+
+    assert_equal({@uuids[1] => 'v1', @uuids[2] => 'v1'}, @twitter.get(:StatusRelationships, k, 'user_timelines')) # supercolumn happy
+    assert_equal({@uuids[1] => 'v3'}, @twitter.get(:StatusRelationships, k + '1', 'user_timelines')) # one subcolumn deleted, one updated
   end
 
   def test_complain_about_nil_key

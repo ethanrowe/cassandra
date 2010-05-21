@@ -102,5 +102,27 @@ class Cassandra
         )
       )
     end
+
+    def _basic_deletion(column, super_column, timestamp)
+      predicate = if column.nil?
+        CassandraThrift::SlicePredicate.new(
+          :slice_range => CassandraThrift::SliceRange.new(
+            :start  => '',
+            :finish => '',
+            # i32 ceiling
+            :count  => 2_147_483_647
+          )
+        )
+      else
+        CassandraThrift::SlicePredicate.new(:column_names => [column])
+      end
+      CassandraThrift::Mutation.new(:deletion =>
+        CassandraThrift::Deletion.new(
+          :timestamp    => timestamp,
+          :predicate    => predicate,
+          :super_column => super_column
+        )
+      )
+    end
   end
 end

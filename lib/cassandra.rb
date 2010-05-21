@@ -17,6 +17,7 @@ require 'cassandra/long'
 require 'cassandra/ordered_hash'
 require 'cassandra/columns'
 require 'cassandra/protocol'
+require 'cassandra/batch'
 require 'cassandra/cassandra'
 require 'cassandra/constants'
 require 'cassandra/debug' if ENV['DEBUG']
